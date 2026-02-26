@@ -1,0 +1,50 @@
+name: "AI Action Firewall Client v1 (Hard-Fail Gate)"
+description: "Diff-only added-lines -> canonical intent -> POST /admit -> verify signature -> hard fail on any mismatch (fail-closed)."
+inputs:
+  auth_base_url:
+    description: "Authority base URL (e.g., http://<VPS>:8787)"
+    required: true
+  expected_pubkey_sha256:
+    description: "Pinned public key sha256 (hex lowercase)"
+    required: true
+  policy_id:
+    description: "Policy ID"
+    required: true
+    default: "ai-secrets-v1"
+  timeout_ms:
+    description: "HTTP timeout in ms (read+write)"
+    required: true
+    default: "2000"
+  max_retries:
+    description: "Max retries on network error"
+    required: true
+    default: "1"
+  before_sha:
+    description: "Base commit SHA (github.event.before)"
+    required: true
+  head_sha:
+    description: "Head commit SHA (github.sha)"
+    required: true
+runs:
+  using: "composite"
+  steps:
+    - name: Gate (deterministic admit + verify)
+      shell: bash
+      env:
+        AUTH_BASE_URL: ${{ inputs.auth_base_url }}
+        EXPECTED_PUBKEY_SHA256: ${{ inputs.expected_pubkey_sha256 }}
+        POLICY_ID: ${{ inputs.policy_id }}
+        TIMEOUT_MS: ${{ inputs.timeout_ms }}
+        MAX_RETRIES: ${{ inputs.max_retries }}
+        BEFORE_SHA: ${{ inputs.before_sha }}
+        HEAD_SHA: ${{ inputs.head_sha }}
+        REPO_FULL: ${{ github.repository }}
+        REF_FULL: ${{ github.ref }}
+      run: |
+        set -euo pipefail
+        echo "AUTH_BASE_URL=${AUTH_BASE_URL}"
+        echo "EXPECTED_PUBKEY_SHA256=${EXPECTED_PUBKEY_SHA256}"
+        echo "POLICY_ID=${POLICY_ID}"
+        echo "BEFORE_SHA=${BEFORE_SHA}"
+        echo "HEAD_SHA=${HEAD_SHA}"
+        go run ./action/main.go
