@@ -1,0 +1,9 @@
+{
+  "policy_id": "ai-secrets-v1",
+  "l5_auth_url": "FIXME",
+  "authority_pubkey_sha256": "FIXME",
+  "runtime_archive_sha256": "FIXME",
+  "runtime_archive_sources": [
+    "FIXME"
+  ]
+}

@@ -1,0 +1,17 @@
+name: phase5
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  phase5:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout (pinned)
+        uses: actions/checkout@8ade135a41bc03ea155e62e844d188df1ea18608
+        with:
+          fetch-depth: 0
