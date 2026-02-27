@@ -30,6 +30,7 @@ runs:
   steps:
     - name: Gate (deterministic admit + verify)
       shell: bash
+      working-directory: ${{ github.action_path }}
       env:
         AUTH_BASE_URL: ${{ inputs.auth_base_url }}
         EXPECTED_PUBKEY_SHA256: ${{ inputs.expected_pubkey_sha256 }}
@@ -47,4 +48,4 @@ runs:
         echo "POLICY_ID=${POLICY_ID}"
         echo "BEFORE_SHA=${BEFORE_SHA}"
         echo "HEAD_SHA=${HEAD_SHA}"
-        go run "$GITHUB_ACTION_PATH/"
+        go run ./main.go
