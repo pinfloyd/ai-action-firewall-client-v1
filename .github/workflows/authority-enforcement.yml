@@ -1,0 +1,26 @@
+name: authority-enforcement
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  admit:
+    runs-on: ubuntu-24.04
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@8ade135a41bc03ea155e62e844d188df1ea18608
+
+      - name: Authority health check
+        run: |
+          set -e
+          curl -fsS http://127.0.0.1:8787/health >/dev/null
+
+      - name: Fail closed placeholder
+        run: |
+          echo "Authority binding active"
