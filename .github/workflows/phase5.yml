@@ -13,5 +13,7 @@ jobs:
     steps:
       - name: Checkout (pinned)
         uses: actions/checkout@8ade135a41bc03ea155e62e844d188df1ea18608
-        with:
+      - name: PHASE5.3-A OIDC precheck
+        shell: pwsh
+        run: pwsh -NoLogo -NoProfile -ExecutionPolicy Bypass -File "H:\SG_PROGRAM_CANONICAL\repos\ai-action-firewall-client-v1\tools\phase5_3_oidc_precheck.ps1"        with:
           fetch-depth: 0
