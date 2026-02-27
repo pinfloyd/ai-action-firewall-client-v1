@@ -22,7 +22,7 @@ jobs:
       - name: Authority health check
         run: |
           set -e
-          curl -fsS http://127.0.0.1:8787/health >/dev/null
+          curl -fsS $(cat .authority/endpoint.lock | cut -d= -f2)/health >/dev/null
 
       - name: Fail closed placeholder
         run: |
