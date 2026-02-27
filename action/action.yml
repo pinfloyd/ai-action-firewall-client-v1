@@ -47,4 +47,4 @@ runs:
         echo "POLICY_ID=${POLICY_ID}"
         echo "BEFORE_SHA=${BEFORE_SHA}"
         echo "HEAD_SHA=${HEAD_SHA}"
-        go run "$GITHUB_ACTION_PATH/action/main.go"
+        go run "$GITHUB_ACTION_PATH/"
