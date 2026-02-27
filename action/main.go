@@ -239,8 +239,35 @@ func runGitDiffAddedLines(before, head string) ([]string, error) {
             before = emptyTree
         }
     }
+    // --- PHASE5 FIX: BEFORE_SHA may be missing in checkout; recover deterministically (fail-closed) ---
+    const emptyTree = "4b825dc642cb6eb9a060e54bf8d69288fbee4904"
+    const maxDiffBytes = 5 * 1024 * 1024 // 5 MiB cap (deterministic)
+
+    gitHasCommit := func(sha string) bool {
+        if sha == "" { return false }
+        c := exec.Command("git", "cat-file", "-e", sha+"^{commit}")
+        c.Stdout = nil
+        c.Stderr = nil
+        return c.Run() == nil
+    }
+
+    if !gitHasCommit(before) {
+        fmt.Printf("BEFORE_SHA_MISSING:%s
+", before)
+        if before != "" {
+            _ = exec.Command("git", "fetch", "--no-tags", "--depth=1", "origin", before).Run()
+        }
+        if !gitHasCommit(before) {
+            before = emptyTree
+        }
+    }
     cmd := exec.Command("git", "diff", "--unified=0", before, head)
     out, err := cmd.CombinedOutput()
+    if len(out) > maxDiffBytes {
+        fmt.Printf("DIFF_BASE_UNAVAILABLE_TOO_LARGE:bytes=%d cap=%d
+", len(out), maxDiffBytes)
+        return nil, fmt.Errorf("DIFF_BASE_UNAVAILABLE_TOO_LARGE")
+    }
     if len(out) > maxDiffBytes {
         fmt.Printf("DIFF_BASE_UNAVAILABLE_TOO_LARGE:bytes=%d cap=%d
 ", len(out), maxDiffBytes)
