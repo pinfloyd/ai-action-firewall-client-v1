@@ -1,5 +1,7 @@
 
+    // --- PHASE5 FIX: BEFORE_SHA may be missing in checkout; recover deterministically (fail-closed preserved) ---
     // Rule: never assume github.event.before exists. First verify, then one fetch attempt, else fallback to EMPTY_TREE->HEAD.
+    const emptyTree = "4b825dc642cb6eb9a060e54bf8d69288fbee4904"
 
     gitHasCommit := func(sha string) bool {
         if sha == "" { return false }
@@ -10,6 +12,7 @@
     }
 
     if !gitHasCommit(beforeSHA) {
+        fmt.Printf("BEFORE_SHA_MISSING:%s\n", beforeSHA)
         if beforeSHA != "" {
             // One attempt: fetch that exact commit shallowly
             _ = exec.Command("git", "fetch", "--no-tags", "--depth=1", "origin", beforeSHA).Run()
@@ -20,11 +23,13 @@
     }
 
     // Fallback base: if beforeSHA unavailable -> use empty tree (treat all lines as added-lines)
+    diffBase := beforeSHA
     if diffBase == "" {
         diffBase = emptyTree
     }
 
     // Hard cap on diff output size to avoid runaway "all files" cases; if exceeded -> DENY (fail-closed)
+    const maxDiffBytes = 5 * 1024 * 1024 // 5 MiB cap (deterministic)package main
 
 import (
 "bytes"
@@ -242,7 +247,9 @@ func runGitDiffAddedLines(before, head string) ([]string, error) {
         return nil, fmt.Errorf("DIFF_BASE_UNAVAILABLE_TOO_LARGE")
     }
     if len(out) > maxDiffBytes {
+        fmt.Printf("DIFF_BASE_UNAVAILABLE_TOO_LARGE:bytes=%d cap=%d\n", len(out), maxDiffBytes)
         // fail-closed: treat as DENY (caller should propagate as hard fail)
+        return nil, fmt.Errorf("DIFF_BASE_UNAVAILABLE_TOO_LARGE")
     }
 if err != nil {
 return nil, fmt.Errorf("GIT_DIFF_FAIL: %v\n%s", err, string(out))
