@@ -1,1 +1,1 @@
-{"authority_url":"http://127.0.0.1:8787/admit","pubkey_sha256":"070ecb8410d8a261b0c173f9f1c42022f5c8d946a42d4b8b402e3460656480d4","protocol":"intent-v1","mode":"fail-closed"}
+{"authority_url":"http://127.0.0.1:8787/admit","pubkey_sha256":"0000000000000000000000000000000000000000000000000000000000000000","protocol":"intent-v1","mode":"fail-closed"}
