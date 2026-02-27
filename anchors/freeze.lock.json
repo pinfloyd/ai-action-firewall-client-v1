@@ -1,9 +1,1 @@
-{
-  "policy_id": "ai-secrets-v1",
-  "l5_auth_url": "FIXME",
-  "authority_pubkey_sha256": "FIXME",
-  "runtime_archive_sha256": "FIXME",
-  "runtime_archive_sources": [
-    "FIXME"
-  ]
-}
+{"policy_id":"ai-secrets-v1","l5_auth_url":"http://127.0.0.1:8787/admit","authority_pubkey_sha256":"FIXME","runtime_archive_sha256":"FIXME","runtime_archive_sources":["FIXME"],"pubkey_sha256":"070ecb8410d8a261b0c173f9f1c42022f5c8d946a42d4b8b402e3460656480d4"}

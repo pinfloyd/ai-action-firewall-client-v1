@@ -1,0 +1,164 @@
+**********************
+PowerShell transcript start
+Start time: 20260227192732
+Username: DESKTOP-KEEAJSB\Floyd
+RunAs User: DESKTOP-KEEAJSB\Floyd
+Configuration Name: 
+Machine: DESKTOP-KEEAJSB (Microsoft Windows NT 10.0.26200.0)
+Host Application: C:\Program Files\PowerShell\7\pwsh.dll
+Process ID: 28528
+PSVersion: 7.5.4
+PSEdition: Core
+GitCommitId: 7.5.4
+OS: Microsoft Windows 10.0.26200
+Platform: Win32NT
+PSCompatibleVersions: 1.0, 2.0, 3.0, 4.0, 5.0, 5.1, 6.0, 7.0
+PSRemotingProtocolVersion: 2.3
+SerializationVersion: 1.1.0.1
+WSManStackVersion: 3.0
+**********************
+PS C:\Users\Floyd> try {
+  foreach($p in @($AUTH_JSON,$RAW_BIN,$SHA_TXT,$LOCK,$WF)){
+    if(-not (Test-Path -LiteralPath $p)){ throw "STOP_MISSING_REQUIRED_FILE:$p" }
+  }
+
+  "=== PHASE5_8_PREFLIGHT: FILE PRESENCE OK ==="
+
+  # --- Load & validate authority.json (no placeholders) ---
+  $authRaw = Get-Content -LiteralPath $AUTH_JSON -Raw
+  $authObj = $authRaw | ConvertFrom-Json
+
+  if([string]::IsNullOrWhiteSpace($authObj.authority_url)) { throw "STOP_AUTHORITY_URL_EMPTY" }
+  if($authObj.authority_url -match 'YOUR_AUTHORITY_HOST|FIXME') { throw "STOP_AUTHORITY_URL_PLACEHOLDER" }
+  if($authObj.authority_url -notmatch '^https?://') { throw "STOP_AUTHORITY_URL_NOT_HTTP" }
+
+  if([string]::IsNullOrWhiteSpace($authObj.pubkey_sha256)) { throw "STOP_PUBKEY_SHA256_EMPTY_IN_AUTHORITY_JSON" }
+  if($authObj.pubkey_sha256 -match 'FIXME') { throw "STOP_PUBKEY_SHA256_PLACEHOLDER_IN_AUTHORITY_JSON" }
+  if($authObj.pubkey_sha256 -notmatch '^[0-9a-f]{64}$') { throw "STOP_PUBKEY_SHA256_NOT_HEX64_IN_AUTHORITY_JSON:$($authObj.pubkey_sha256)" }
+
+  if($authObj.protocol -ne "intent-v1") { throw "STOP_PROTOCOL_NOT_INTENT_V1:$($authObj.protocol)" }
+  if($authObj.mode -ne "fail-closed")   { throw "STOP_MODE_NOT_FAIL_CLOSED:$($authObj.mode)" }
+
+  "AUTHORITY_URL=$($authObj.authority_url)"
+  "AUTHORITY_PUBKEY_SHA256_JSON=$($authObj.pubkey_sha256)"
+  "AUTHORITY_PROTOCOL=$($authObj.protocol)"
+  "AUTHORITY_MODE=$($authObj.mode)"
+
+  # --- Enforce pubkey pin invariants: raw.bin => sha256.txt => authority.json ---
+  $bytes = [IO.File]::ReadAllBytes($RAW_BIN)
+  if($bytes.Length -ne 32) { throw "STOP_INVALID_ED25519_RAW_LEN:$($bytes.Length)" }
+
+  $shaFromRaw = (([System.Security.Cryptography.SHA256]::Create()).ComputeHash($bytes) | ForEach-Object { $_.ToString("x2") }) -join ""
+  if($shaFromRaw -notmatch '^[0-9a-f]{64}$') { throw "STOP_SHA_FROM_RAW_INVALID:$shaFromRaw" }
+
+  $shaFromTxt = (Get-Content -LiteralPath $SHA_TXT -Raw).Trim()
+  if($shaFromTxt -notmatch '^[0-9a-f]{64}$') { throw "STOP_SHA_TXT_INVALID:$shaFromTxt" }
+
+  if($shaFromTxt -ne $shaFromRaw) { throw "STOP_SHA_TXT_MISMATCH_RAW" }
+  if($authObj.pubkey_sha256 -ne $shaFromRaw) { throw "STOP_AUTHORITY_JSON_PUBKEY_MISMATCH_RAW" }
+
+  "PUBKEY_RAW_LEN=32"
+  "PUBKEY_SHA256_RAW=$shaFromRaw"
+  "PUBKEY_SHA256_TXT=$shaFromTxt"
+  "PUBKEY_SHA256_MATCH=YES"
+
+  # --- Validate lockfile basic fields exist (no assumptions about full schema) ---
+  $lockRaw = Get-Content -LiteralPath $LOCK -Raw
+  $lockObj = $lockRaw | ConvertFrom-Json
+
+  foreach($k in @("policy_id","l5_auth_url","pubkey_sha256","runtime_archive_sha256","runtime_archive_sources")){
+    if(-not ($lockObj.PSObject.Properties.Name -contains $k)){
+      throw "STOP_LOCKFILE_MISSING_KEY:$k"
+    }
+  }
+
+  if([string]::IsNullOrWhiteSpace($lockObj.policy_id)) { throw "STOP_LOCK_POLICY_ID_EMPTY" }
+  if($lockObj.policy_id -notmatch '^[a-z0-9][a-z0-9\-_]*$'){ throw "STOP_LOCK_POLICY_ID_NOT_LOWER_SAFE:$($lockObj.policy_id)" }
+
+  if([string]::IsNullOrWhiteSpace($lockObj.l5_auth_url)) { throw "STOP_LOCK_L5_AUTH_URL_EMPTY" }
+  if($lockObj.l5_auth_url -match 'FIXME|YOUR_AUTHORITY_HOST') { throw "STOP_LOCK_L5_AUTH_URL_PLACEHOLDER" }
+
+  if($lockObj.pubkey_sha256 -ne $shaFromRaw) { throw "STOP_LOCK_PUBKEY_SHA_MISMATCH_RAW" }
+
+  if([string]::IsNullOrWhiteSpace($lockObj.runtime_archive_sha256)) { throw "STOP_LOCK_RUNTIME_SHA_EMPTY" }
+  if($lockObj.runtime_archive_sha256 -notmatch '^[0-9a-f]{64}$'){ throw "STOP_LOCK_RUNTIME_SHA_NOT_HEX64:$($lockObj.runtime_archive_sha256)" }
+
+  if(-not ($lockObj.runtime_archive_sources -is [System.Collections.IEnumerable])) { throw "STOP_LOCK_RUNTIME_SOURCES_NOT_ARRAY" }
+
+  "LOCK_POLICY_ID=$($lockObj.policy_id)"
+  "LOCK_L5_AUTH_URL=$($lockObj.l5_auth_url)"
+  "LOCK_PUBKEY_SHA256=$($lockObj.pubkey_sha256)"
+  "LOCK_RUNTIME_ARCHIVE_SHA256=$($lockObj.runtime_archive_sha256)"
+  "LOCK_RUNTIME_SOURCES_COUNT=$(@($lockObj.runtime_archive_sources).Count)"
+
+  # --- Enforce authority_url alignment (authority.json vs lockfile) ---
+  if($authObj.authority_url -ne $lockObj.l5_auth_url) { throw "STOP_AUTHORITY_URL_MISMATCH_LOCKFILE" }
+  "AUTHORITY_URL_MATCH_LOCKFILE=YES"
+
+  # --- Network preflight (no PASS if unreachable) ---
+  $admitUrl = $authObj.authority_url
+  $baseUrl = $admitUrl -replace '/admit/?$',''
+  if($baseUrl -eq $admitUrl){ throw "STOP_AUTHORITY_URL_NOT_ENDING_IN_/admit" }
+
+  "AUTHORITY_BASE_URL=$baseUrl"
+
+  function TryHttp([string]$method,[string]$url){
+    try{
+      $r = Invoke-WebRequest -Uri $url -Method $method -UseBasicParsing -TimeoutSec 2
+      "HTTP_OK method=$method url=$url status=$($r.StatusCode) len=$($r.Content.Length)"
+    } catch {
+      "HTTP_FAIL method=$method url=$url err=$($_.Exception.Message)"
+      throw "STOP_HTTP_FAIL:$method:$url"
+    }
+  }
+
+  TryHttp "GET" "$baseUrl/health" | Out-String | Write-Host
+  # /admit must exist; POST may return 400/401 without payload; we only prove route exists by OPTIONS or POST with empty body if allowed
+  try {
+    $r = Invoke-WebRequest -Uri $admitUrl -Method Options -UseBasicParsing -TimeoutSec 2
+    "HTTP_OK method=OPTIONS url=$admitUrl status=$($r.StatusCode)" | Write-Host
+  } catch {
+    # If OPTIONS not supported, try GET to prove 405/404 distinction
+    try {
+      $r2 = Invoke-WebRequest -Uri $admitUrl -Method Get -UseBasicParsing -TimeoutSec 2
+      "HTTP_OK method=GET url=$admitUrl status=$($r2.StatusCode)" | Write-Host
+    } catch {
+      # Accept 405 as evidence of route; 404 is not acceptable
+      $msg = $_.Exception.Message
+      "HTTP_FAIL method=GET url=$admitUrl err=$msg" | Write-Host
+      if($msg -match '405'){ "ADMIT_ROUTE_EXISTS=YES (405)" | Write-Host }
+      else { throw "STOP_ADMIT_ROUTE_NOT_PROVEN" }
+    }
+  }
+
+  "STATUS=PHASE5_8_PREFLIGHT_OK"
+  "EVIDENCE_DIR=$EVDIR"
+  "TRANSCRIPT=$TRANSCRIPT"
+}
+finally {
+  Stop-Transcript | Out-Null
+}
+At line:92 char:29
++       throw "STOP_HTTP_FAIL:$method:$url"
++                             ~~~~~~~~
+Variable reference is not valid. ':' was not followed by a valid variable name character. Consider using ${} to delimit the name.
+ParserError: 
+Line |
+  92 |        throw "STOP_HTTP_FAIL:$method:$url"
+     |                              ~~~~~~~~
+     | Variable reference is not valid. ':' was not followed by a valid variable name character. Consider using ${} to
+     | delimit the name.
+
+PS C:\Users\Floyd> # SHA256 sidecar for transcript (canonical evidence)
+PS C:\Users\Floyd> $txHash = (Get-FileHash -LiteralPath $TRANSCRIPT -Algorithm SHA256).Hash.ToLower()
+>> TerminatingError(Get-FileHash): "The running command stopped because the preference variable "ErrorActionPreference" or common parameter is set to Stop: The process cannot access the file 'H:\SG_PROGRAM_CANONICAL\repos\ai-action-firewall-client-v1\evidence\PHASE5_8_PREFLIGHT_20260227_192732\TRANSCRIPT_PHASE5_8_PREFLIGHT_20260227_192732.txt' because it is being used by another process."
+>> TerminatingError(Get-FileHash): "The running command stopped because the preference variable "ErrorActionPreference" or common parameter is set to Stop: The process cannot access the file 'H:\SG_PROGRAM_CANONICAL\repos\ai-action-firewall-client-v1\evidence\PHASE5_8_PREFLIGHT_20260227_192732\TRANSCRIPT_PHASE5_8_PREFLIGHT_20260227_192732.txt' because it is being used by another process."
+The running command stopped because the preference variable "ErrorActionPreference" or common parameter is set to Stop: The process cannot access the file 'H:\SG_PROGRAM_CANONICAL\repos\ai-action-firewall-client-v1\evidence\PHASE5_8_PREFLIGHT_20260227_192732\TRANSCRIPT_PHASE5_8_PREFLIGHT_20260227_192732.txt' because it is being used by another process.
+Get-FileHash: The process cannot access the file 'H:\SG_PROGRAM_CANONICAL\repos\ai-action-firewall-client-v1\evidence\PHASE5_8_PREFLIGHT_20260227_192732\TRANSCRIPT_PHASE5_8_PREFLIGHT_20260227_192732.txt' because it is being used by another process.
+PS C:\Users\Floyd> Set-Content -LiteralPath ($TRANSCRIPT + ".sha256") -Value $txHash -Encoding ascii -NoNewline
+PS C:\Users\Floyd> "TRANSCRIPT_SHA256=$txHash"
+TRANSCRIPT_SHA256=
+**********************
+PowerShell transcript end
+End time: 20260227193033
+**********************

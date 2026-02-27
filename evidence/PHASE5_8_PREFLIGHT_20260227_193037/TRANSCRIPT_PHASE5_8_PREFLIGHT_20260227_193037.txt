@@ -1,0 +1,135 @@
+**********************
+PowerShell transcript start
+Start time: 20260227193037
+Username: DESKTOP-KEEAJSB\Floyd
+RunAs User: DESKTOP-KEEAJSB\Floyd
+Configuration Name: 
+Machine: DESKTOP-KEEAJSB (Microsoft Windows NT 10.0.26200.0)
+Host Application: C:\Program Files\PowerShell\7\pwsh.dll
+Process ID: 5608
+PSVersion: 7.5.4
+PSEdition: Core
+GitCommitId: 7.5.4
+OS: Microsoft Windows 10.0.26200
+Platform: Win32NT
+PSCompatibleVersions: 1.0, 2.0, 3.0, 4.0, 5.0, 5.1, 6.0, 7.0
+PSRemotingProtocolVersion: 2.3
+SerializationVersion: 1.1.0.1
+WSManStackVersion: 3.0
+**********************
+PS C:\Users\Floyd> $prefOk = $false
+PS C:\Users\Floyd> try {
+  foreach($p in @($AUTH_JSON,$RAW_BIN,$SHA_TXT,$LOCK,$WF)){
+    if(-not (Test-Path -LiteralPath $p)){ throw "STOP_MISSING_REQUIRED_FILE:$p" }
+  }
+  "=== PHASE5_8_PREFLIGHT: FILE PRESENCE OK ==="
+
+  # --- authority.json (no placeholders) ---
+  $authObj = (Get-Content -LiteralPath $AUTH_JSON -Raw) | ConvertFrom-Json
+
+  if([string]::IsNullOrWhiteSpace($authObj.authority_url)) { throw "STOP_AUTHORITY_URL_EMPTY" }
+  if($authObj.authority_url -match 'YOUR_AUTHORITY_HOST|FIXME') { throw "STOP_AUTHORITY_URL_PLACEHOLDER" }
+  if($authObj.authority_url -notmatch '^https?://') { throw "STOP_AUTHORITY_URL_NOT_HTTP" }
+
+  if([string]::IsNullOrWhiteSpace($authObj.pubkey_sha256)) { throw "STOP_PUBKEY_SHA256_EMPTY_IN_AUTHORITY_JSON" }
+  if($authObj.pubkey_sha256 -match 'FIXME') { throw "STOP_PUBKEY_SHA256_PLACEHOLDER_IN_AUTHORITY_JSON" }
+  if($authObj.pubkey_sha256 -notmatch '^[0-9a-f]{64}$') { throw ("STOP_PUBKEY_SHA256_NOT_HEX64_IN_AUTHORITY_JSON:{0}" -f $authObj.pubkey_sha256) }
+
+  if($authObj.protocol -ne "intent-v1") { throw ("STOP_PROTOCOL_NOT_INTENT_V1:{0}" -f $authObj.protocol) }
+  if($authObj.mode -ne "fail-closed")   { throw ("STOP_MODE_NOT_FAIL_CLOSED:{0}" -f $authObj.mode) }
+
+  "AUTHORITY_URL=$($authObj.authority_url)"
+  "AUTHORITY_PUBKEY_SHA256_JSON=$($authObj.pubkey_sha256)"
+  "AUTHORITY_PROTOCOL=$($authObj.protocol)"
+  "AUTHORITY_MODE=$($authObj.mode)"
+
+  # --- pubkey pin invariants ---
+  $bytes = [IO.File]::ReadAllBytes($RAW_BIN)
+  if($bytes.Length -ne 32) { throw ("STOP_INVALID_ED25519_RAW_LEN:{0}" -f $bytes.Length) }
+
+  $shaFromRaw = (([System.Security.Cryptography.SHA256]::Create()).ComputeHash($bytes) | ForEach-Object { $_.ToString("x2") }) -join ""
+  if($shaFromRaw -notmatch '^[0-9a-f]{64}$') { throw ("STOP_SHA_FROM_RAW_INVALID:{0}" -f $shaFromRaw) }
+
+  $shaFromTxt = (Get-Content -LiteralPath $SHA_TXT -Raw).Trim()
+  if($shaFromTxt -notmatch '^[0-9a-f]{64}$') { throw ("STOP_SHA_TXT_INVALID:{0}" -f $shaFromTxt) }
+
+  if($shaFromTxt -ne $shaFromRaw) { throw "STOP_SHA_TXT_MISMATCH_RAW" }
+  if($authObj.pubkey_sha256 -ne $shaFromRaw) { throw "STOP_AUTHORITY_JSON_PUBKEY_MISMATCH_RAW" }
+
+  "PUBKEY_RAW_LEN=32"
+  "PUBKEY_SHA256_RAW=$shaFromRaw"
+  "PUBKEY_SHA256_TXT=$shaFromTxt"
+  "PUBKEY_SHA256_MATCH=YES"
+
+  # --- lockfile required keys ---
+  $lockObj = (Get-Content -LiteralPath $LOCK -Raw) | ConvertFrom-Json
+  foreach($k in @("policy_id","l5_auth_url","pubkey_sha256","runtime_archive_sha256","runtime_archive_sources")){
+    if(-not ($lockObj.PSObject.Properties.Name -contains $k)){ throw ("STOP_LOCKFILE_MISSING_KEY:{0}" -f $k) }
+  }
+
+  if([string]::IsNullOrWhiteSpace($lockObj.policy_id)) { throw "STOP_LOCK_POLICY_ID_EMPTY" }
+  if($lockObj.policy_id -notmatch '^[a-z0-9][a-z0-9\-_]*$'){ throw ("STOP_LOCK_POLICY_ID_NOT_LOWER_SAFE:{0}" -f $lockObj.policy_id) }
+
+  if([string]::IsNullOrWhiteSpace($lockObj.l5_auth_url)) { throw "STOP_LOCK_L5_AUTH_URL_EMPTY" }
+  if($lockObj.l5_auth_url -match 'FIXME|YOUR_AUTHORITY_HOST') { throw "STOP_LOCK_L5_AUTH_URL_PLACEHOLDER" }
+
+  if($lockObj.pubkey_sha256 -ne $shaFromRaw) { throw "STOP_LOCK_PUBKEY_SHA_MISMATCH_RAW" }
+
+  if([string]::IsNullOrWhiteSpace($lockObj.runtime_archive_sha256)) { throw "STOP_LOCK_RUNTIME_SHA_EMPTY" }
+  if($lockObj.runtime_archive_sha256 -notmatch '^[0-9a-f]{64}$'){ throw ("STOP_LOCK_RUNTIME_SHA_NOT_HEX64:{0}" -f $lockObj.runtime_archive_sha256) }
+
+  if(-not ($lockObj.runtime_archive_sources -is [System.Collections.IEnumerable])) { throw "STOP_LOCK_RUNTIME_SOURCES_NOT_ARRAY" }
+
+  "LOCK_POLICY_ID=$($lockObj.policy_id)"
+  "LOCK_L5_AUTH_URL=$($lockObj.l5_auth_url)"
+  "LOCK_PUBKEY_SHA256=$($lockObj.pubkey_sha256)"
+  "LOCK_RUNTIME_ARCHIVE_SHA256=$($lockObj.runtime_archive_sha256)"
+  "LOCK_RUNTIME_SOURCES_COUNT=$(@($lockObj.runtime_archive_sources).Count)"
+
+  # --- authority_url alignment ---
+  if($authObj.authority_url -ne $lockObj.l5_auth_url) { throw "STOP_AUTHORITY_URL_MISMATCH_LOCKFILE" }
+  "AUTHORITY_URL_MATCH_LOCKFILE=YES"
+
+  # --- network proof (reachability) ---
+  $admitUrl = $authObj.authority_url
+  $baseUrl  = $admitUrl -replace '/admit/?$',''
+  if($baseUrl -eq $admitUrl){ throw "STOP_AUTHORITY_URL_NOT_ENDING_IN_/admit" }
+  "AUTHORITY_BASE_URL=$baseUrl"
+
+  function TryHttp([string]$method,[string]$url){
+    try{
+      $r = Invoke-WebRequest -Uri $url -Method $method -UseBasicParsing -TimeoutSec 2
+      ("HTTP_OK method={0} url={1} status={2} len={3}" -f $method,$url,$r.StatusCode,$r.Content.Length)
+    } catch {
+      ("HTTP_FAIL method={0} url={1} err={2}" -f $method,$url,$_.Exception.Message)
+      throw ("STOP_HTTP_FAIL method={0} url={1}" -f $method,$url)
+    }
+  }
+
+  TryHttp "GET" "$baseUrl/health" | Out-String | Write-Host
+
+  # Prove /admit route exists: accept 405 on GET as existence proof (not 404)
+  try {
+    $r2 = Invoke-WebRequest -Uri $admitUrl -Method Get -UseBasicParsing -TimeoutSec 2
+    ("HTTP_OK method=GET url={0} status={1}" -f $admitUrl,$r2.StatusCode) | Write-Host
+  } catch {
+    $msg = $_.Exception.Message
+    ("HTTP_FAIL method=GET url={0} err={1}" -f $admitUrl,$msg) | Write-Host
+    if($msg -match '405'){ "ADMIT_ROUTE_EXISTS=YES (405)" | Write-Host }
+    else { throw "STOP_ADMIT_ROUTE_NOT_PROVEN" }
+  }
+
+  "STATUS=PHASE5_8_PREFLIGHT_OK"
+  "EVIDENCE_DIR=$EVDIR"
+  "TRANSCRIPT=$TRANSCRIPT"
+
+  $prefOk = $true
+}
+finally {
+  try { Stop-Transcript | Out-Null } catch { }
+}
+=== PHASE5_8_PREFLIGHT: FILE PRESENCE OK ===
+**********************
+PowerShell transcript end
+End time: 20260227193037
+**********************

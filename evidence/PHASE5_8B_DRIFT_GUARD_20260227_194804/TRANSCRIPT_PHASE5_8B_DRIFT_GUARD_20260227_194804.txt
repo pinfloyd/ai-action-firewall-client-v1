@@ -1,0 +1,154 @@
+**********************
+PowerShell transcript start
+Start time: 20260227194804
+Username: DESKTOP-KEEAJSB\Floyd
+RunAs User: DESKTOP-KEEAJSB\Floyd
+Configuration Name: 
+Machine: DESKTOP-KEEAJSB (Microsoft Windows NT 10.0.26200.0)
+Host Application: C:\Program Files\PowerShell\7\pwsh.dll
+Process ID: 39268
+PSVersion: 7.5.4
+PSEdition: Core
+GitCommitId: 7.5.4
+OS: Microsoft Windows 10.0.26200
+Platform: Win32NT
+PSCompatibleVersions: 1.0, 2.0, 3.0, 4.0, 5.0, 5.1, 6.0, 7.0
+PSRemotingProtocolVersion: 2.3
+SerializationVersion: 1.1.0.1
+WSManStackVersion: 3.0
+**********************
+PS C:\Users\Floyd> $ok = $false
+PS C:\Users\Floyd> try {
+  $authObj = (Get-Content -LiteralPath $AUTH_PATH -Raw) | ConvertFrom-Json
+  $lockObj = (Get-Content -LiteralPath $LOCK_PATH -Raw) | ConvertFrom-Json
+
+  if([string]::IsNullOrWhiteSpace($authObj.authority_url)) { throw "STOP_AUTHORITY_URL_EMPTY" }
+  if($authObj.authority_url -notmatch '^https?://') { throw "STOP_AUTHORITY_URL_NOT_HTTP" }
+  if($authObj.authority_url -notmatch '/admit/?$') { throw "STOP_AUTHORITY_URL_NOT_ENDING_IN_/admit" }
+
+  if([string]::IsNullOrWhiteSpace($lockObj.l5_auth_url)) { throw "STOP_LOCK_L5_AUTH_URL_EMPTY" }
+  if($lockObj.l5_auth_url -ne $authObj.authority_url) { throw "STOP_AUTHORITY_URL_MISMATCH_LOCKFILE" }
+
+  if([string]::IsNullOrWhiteSpace($lockObj.pubkey_sha256)) { throw "STOP_LOCK_PUBKEY_SHA256_EMPTY" }
+  if($lockObj.pubkey_sha256 -notmatch '^[0-9a-f]{64}$') { throw "STOP_LOCK_PUBKEY_SHA256_NOT_HEX64" }
+
+  $pinned = $lockObj.pubkey_sha256
+  "PINNED_PUBKEY_SHA256=$pinned"
+  "AUTHORITY_ADMIT_URL=$($authObj.authority_url)"
+
+  $baseUrl = $authObj.authority_url -replace '/admit/?$',''
+  if($baseUrl -eq $authObj.authority_url){ throw "STOP_BASEURL_DERIVATION_FAIL" }
+
+  $pubkeyUrl = "$baseUrl/pubkey"
+  "AUTHORITY_PUBKEY_URL=$pubkeyUrl"
+
+  # --- Fetch /pubkey (fixed timeout, fail-closed) ---
+  $resp = $null
+  try {
+    $resp = Invoke-WebRequest -Uri $pubkeyUrl -Method Get -UseBasicParsing -TimeoutSec 2
+  } catch {
+    throw ("STOP_HTTP_GET_PUBKEY_FAIL:{0}" -f $_.Exception.Message)
+  }
+
+  if(-not $resp) { throw "STOP_NO_RESPONSE" }
+  if($resp.StatusCode -ne 200) { throw ("STOP_HTTP_STATUS_NOT_200:{0}" -f $resp.StatusCode) }
+
+  $body = $resp.Content
+  if([string]::IsNullOrWhiteSpace($body)) { throw "STOP_EMPTY_PUBKEY_BODY" }
+
+  # Save raw body snapshot (evidence)
+  $BODY_PATH = Join-Path $EVDIR ("PUBKEY_RESPONSE_BODY_" + $TS + ".txt")
+  Set-Content -LiteralPath $BODY_PATH -Value $body -NoNewline
+  $bodySha = (Get-FileHash -LiteralPath $BODY_PATH -Algorithm SHA256).Hash.ToLower()
+  Set-Content -LiteralPath ($BODY_PATH + ".sha256") -Value $bodySha -Encoding ascii -NoNewline
+  "PUBKEY_BODY_SHA256=$bodySha"
+  "PUBKEY_BODY_PATH=$BODY_PATH"
+
+  # --- Determine remote pubkey sha (strict: must be provable; else FAIL) ---
+  $remoteSha = $null
+
+  # Try JSON first
+  $isJson = $false
+  $obj = $null
+  try {
+    $obj = ($body | ConvertFrom-Json)
+    $isJson = $true
+  } catch {
+    $isJson = $false
+  }
+
+  if($isJson -and $obj) {
+    "PUBKEY_RESPONSE_FORMAT=JSON"
+
+    # Preferred: public_key_sha256 field
+    if($obj.PSObject.Properties.Name -contains "public_key_sha256") {
+      $candidate = [string]$obj.public_key_sha256
+      if(-not [string]::IsNullOrWhiteSpace($candidate) -and $candidate -match '^[0-9a-f]{64}$') {
+        $remoteSha = $candidate
+        "REMOTE_PUBKEY_SHA256_SOURCE=public_key_sha256_field"
+      } else {
+        throw "STOP_PUBLIC_KEY_SHA256_FIELD_INVALID"
+      }
+    }
+    # Fallback: base64 public_key field (must decode to 32 bytes)
+    elseif($obj.PSObject.Properties.Name -contains "public_key") {
+      $b64 = [string]$obj.public_key
+      if([string]::IsNullOrWhiteSpace($b64)) { throw "STOP_PUBLIC_KEY_FIELD_EMPTY" }
+
+      [byte[]]$bytes = $null
+      try { $bytes = [Convert]::FromBase64String($b64) } catch { throw "STOP_PUBLIC_KEY_B64_DECODE_FAIL" }
+
+      if(-not $bytes) { throw "STOP_PUBLIC_KEY_BYTES_NULL" }
+      if($bytes.Length -ne 32) { throw ("STOP_PUBLIC_KEY_BYTES_LEN_NOT_32:{0}" -f $bytes.Length) }
+
+      $remoteSha = (([System.Security.Cryptography.SHA256]::Create()).ComputeHash($bytes) | ForEach-Object { $_.ToString("x2") }) -join ""
+      if($remoteSha -notmatch '^[0-9a-f]{64}$') { throw "STOP_REMOTE_SHA_COMPUTE_INVALID" }
+      "REMOTE_PUBKEY_SHA256_SOURCE=sha256(base64_public_key_bytes)"
+    }
+    else {
+      throw "STOP_PUBKEY_JSON_NO_USABLE_FIELDS"
+    }
+  }
+  else {
+    "PUBKEY_RESPONSE_FORMAT=NON_JSON"
+
+    # Non-JSON is allowed only if the entire body is base64 for 32 bytes
+    $b64 = $body.Trim()
+    [byte[]]$bytes = $null
+    try { $bytes = [Convert]::FromBase64String($b64) } catch { throw "STOP_NONJSON_BODY_NOT_BASE64" }
+
+    if(-not $bytes) { throw "STOP_NONJSON_BYTES_NULL" }
+    if($bytes.Length -ne 32) { throw ("STOP_NONJSON_BYTES_LEN_NOT_32:{0}" -f $bytes.Length) }
+
+    $remoteSha = (([System.Security.Cryptography.SHA256]::Create()).ComputeHash($bytes) | ForEach-Object { $_.ToString("x2") }) -join ""
+    if($remoteSha -notmatch '^[0-9a-f]{64}$') { throw "STOP_REMOTE_SHA_COMPUTE_INVALID" }
+    "REMOTE_PUBKEY_SHA256_SOURCE=sha256(base64_body_bytes)"
+  }
+
+  if([string]::IsNullOrWhiteSpace($remoteSha)) { throw "STOP_REMOTE_SHA_EMPTY" }
+  "REMOTE_PUBKEY_SHA256=$remoteSha"
+
+  # --- Drift guard (enforced) ---
+  if($remoteSha -ne $pinned) {
+    throw ("STOP_AUTHORITY_PUBKEY_DRIFT pinned={0} remote={1}" -f $pinned,$remoteSha)
+  }
+
+  "DRIFT_GUARD=OK"
+  "STATUS=PHASE5_8B_DRIFT_GUARD_OK"
+  "EVIDENCE_DIR=$EVDIR"
+  "TRANSCRIPT=$TRANSCRIPT"
+
+  $ok = $true
+}
+finally {
+  try { Stop-Transcript | Out-Null } catch { }
+}
+PINNED_PUBKEY_SHA256=070ecb8410d8a261b0c173f9f1c42022f5c8d946a42d4b8b402e3460656480d4
+AUTHORITY_ADMIT_URL=http://127.0.0.1:8787/admit
+AUTHORITY_PUBKEY_URL=http://127.0.0.1:8787/pubkey
+>> TerminatingError(Invoke-WebRequest): "404 page not found
+"
+**********************
+PowerShell transcript end
+End time: 20260227194804
+**********************
