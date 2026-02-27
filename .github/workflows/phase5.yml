@@ -1,7 +1,9 @@
 name: phase5
 
 on:
-  workflow_dispatch:
+  push:
+    branches: [ main ]
+  pull_request:
 
 permissions:
   contents: read
@@ -10,10 +12,11 @@ permissions:
 jobs:
   phase5:
     runs-on: ubuntu-24.04
+
     steps:
-      - name: Checkout (pinned)
-        uses: actions/checkout@8ade135a41bc03ea155e62e844d188df1ea18608
-      - name: PHASE5.3-A OIDC precheck
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: OIDC precheck
         shell: pwsh
-        run: pwsh -NoLogo -NoProfile -ExecutionPolicy Bypass -File "H:\SG_PROGRAM_CANONICAL\repos\ai-action-firewall-client-v1\tools\phase5_3_oidc_precheck.ps1"        with:
-          fetch-depth: 0
+        run: pwsh -NoLogo -NoProfile -ExecutionPolicy Bypass -File tools/phase5_3_oidc_precheck.ps1
